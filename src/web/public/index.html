@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>loom — runs</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #11131a;
+    --panel: #181b24;
+    --border: #2a2e3a;
+    --text: #e4e6eb;
+    --muted: #8b90a0;
+    --accent: #5b8def;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+  }
+  header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  #layout {
+    display: grid;
+    grid-template-columns: 220px 340px 1fr;
+    height: calc(100vh - 45px);
+  }
+  .col {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .col:last-child { border-right: none; }
+  .col h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 4px 8px 8px;
+  }
+  .item {
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 2px;
+  }
+  .item:hover { background: var(--panel); }
+  .item.selected { background: var(--panel); outline: 1px solid var(--accent); }
+  .item .title {
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .item .meta {
+    color: var(--muted);
+    font-size: 11px;
+    margin-top: 2px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  .badge.pending { background: #3a3d4d; color: #c3c7d6; }
+  .badge.blocked { background: #3a3d4d; color: #c3c7d6; }
+  .badge.running { background: #2b4a7a; color: #9ec2ff; }
+  .badge.verifying { background: #5a4a1f; color: #f0cf7a; }
+  .badge.merging { background: #5a4a1f; color: #f0cf7a; }
+  .badge.done { background: #1f5a37; color: #7fe3a4; }
+  .badge.failed { background: #5a1f1f; color: #f08080; }
+  .badge.cancelled { background: #3a3d4d; color: #9aa0b4; }
+  #tasks { padding: 16px; overflow-y: auto; }
+  #tasks h2 { margin-top: 0; font-size: 14px; }
+  .task-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: var(--panel);
+  }
+  .task-row .name { font-weight: 500; flex: 1; }
+  .task-row .kind { color: var(--muted); font-size: 11px; }
+  .task-row .error { color: #f08080; font-size: 11px; margin-left: 6px; }
+  .empty { color: var(--muted); padding: 16px; font-size: 13px; }
+  .job-detail-header { margin-bottom: 12px; }
+  .job-detail-header .jid { color: var(--muted); font-size: 11px; font-family: monospace; }
+  .error-box {
+    color: #f08080;
+    background: #291515;
+    border: 1px solid #5a1f1f;
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>loom</h1>
+  <span class="sub">runs dashboard — polling every 3s</span>
+</header>
+<div id="layout">
+  <div class="col" id="projects-col">
+    <h2>Projects</h2>
+    <div class="item selected" id="all-projects" data-project="">
+      <div class="title">All projects</div>
+    </div>
+    <div id="projects-list"></div>
+  </div>
+  <div class="col" id="jobs-col">
+    <h2>Jobs</h2>
+    <div id="jobs-list"><div class="empty">loading…</div></div>
+  </div>
+  <div id="tasks">
+    <div class="empty">Select a job to see its task tree.</div>
+  </div>
+</div>
+
+<script>
+  const state = {
+    projectId: "",
+    jobId: null,
+  };
+
+  function badge(status) {
+    return `<span class="badge ${status}">${status}</span>`;
+  }
+
+  function fmtTime(ms) {
+    if (!ms) return "";
+    return new Date(ms).toLocaleString();
+  }
+
+  async function fetchJson(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+    return res.json();
+  }
+
+  async function refreshProjects() {
+    const projects = await fetchJson("/api/projects");
+    const list = document.getElementById("projects-list");
+    list.innerHTML = projects
+      .map(
+        (p) => `
+      <div class="item ${p.id === state.projectId ? "selected" : ""}" data-project="${p.id}">
+        <div class="title">${escapeHtml(p.name)}</div>
+        <div class="meta">${escapeHtml(p.repo_path)}</div>
+      </div>`,
+      )
+      .join("");
+    for (const el of list.querySelectorAll(".item")) {
+      el.addEventListener("click", () => selectProject(el.dataset.project));
+    }
+  }
+
+  function selectProject(projectId) {
+    state.projectId = projectId || "";
+    state.jobId = null;
+    document.querySelectorAll("#projects-col .item").forEach((el) => {
+      el.classList.toggle("selected", (el.dataset.project || "") === state.projectId);
+    });
+    refreshJobs();
+    renderTasks(null);
+  }
+
+  async function refreshJobs() {
+    const qs = state.projectId ? `?project=${encodeURIComponent(state.projectId)}` : "";
+    const jobs = await fetchJson(`/api/jobs${qs}`);
+    const list = document.getElementById("jobs-list");
+    if (jobs.length === 0) {
+      list.innerHTML = `<div class="empty">No jobs yet.</div>`;
+      return;
+    }
+    list.innerHTML = jobs
+      .map(
+        (j) => `
+      <div class="item ${j.id === state.jobId ? "selected" : ""}" data-job="${j.id}">
+        <div class="title">${escapeHtml(j.title)}</div>
+        <div class="meta">${badge(j.status)}<span>${j.kind}</span><span>${fmtTime(j.created_at)}</span></div>
+      </div>`,
+      )
+      .join("");
+    for (const el of list.querySelectorAll(".item")) {
+      el.addEventListener("click", () => selectJob(el.dataset.job));
+    }
+  }
+
+  function selectJob(jobId) {
+    state.jobId = jobId;
+    document.querySelectorAll("#jobs-col .item").forEach((el) => {
+      el.classList.toggle("selected", el.dataset.job === jobId);
+    });
+    refreshTaskTree();
+  }
+
+  async function refreshTaskTree() {
+    if (!state.jobId) return;
+    try {
+      const view = await fetchJson(`/api/jobs/${state.jobId}/status`);
+      renderTasks(view);
+    } catch (err) {
+      renderTasks(null, String(err));
+    }
+  }
+
+  function renderTasks(view, err) {
+    const el = document.getElementById("tasks");
+    if (err) {
+      el.innerHTML = `<div class="error-box">${escapeHtml(err)}</div>`;
+      return;
+    }
+    if (!view) {
+      el.innerHTML = `<div class="empty">Select a job to see its task tree.</div>`;
+      return;
+    }
+    const { job, tasks } = view;
+    let html = `
+      <div class="job-detail-header">
+        <h2>${escapeHtml(job.title)} ${badge(job.status)}</h2>
+        <div class="jid">${job.id}</div>
+      </div>`;
+    if (job.error) {
+      html += `<div class="error-box">${escapeHtml(job.error)}</div>`;
+    }
+    if (job.kind !== "dag") {
+      html += `<div class="empty">Single "code" job — no task tree.</div>`;
+    } else if (tasks.length === 0) {
+      html += `<div class="empty">No tasks recorded yet.</div>`;
+    } else {
+      html += tasks
+        .map(
+          (t) => `
+        <div class="task-row">
+          <span class="name">${escapeHtml(t.name)}</span>
+          <span class="kind">${t.model ?? ""}</span>
+          ${badge(t.status)}
+          ${t.error ? `<span class="error">${escapeHtml(t.error)}</span>` : ""}
+        </div>`,
+        )
+        .join("");
+    }
+    el.innerHTML = html;
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[c]));
+  }
+
+  document.getElementById("all-projects").addEventListener("click", () => selectProject(""));
+
+  async function tick() {
+    try {
+      await refreshProjects();
+      await refreshJobs();
+      if (state.jobId) await refreshTaskTree();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  tick();
+  setInterval(tick, 3000);
+</script>
+</body>
+</html>

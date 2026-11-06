@@ -27,6 +27,7 @@ Usage:
   loom status <jobId>
   loom jobs [--project <project>]
   loom cancel <jobId>
+  loom serve [--port <port>] [--host <host>]
 `);
 }
 
@@ -150,6 +151,18 @@ async function main(): Promise<void> {
     const outcome = await cancelJobTree(jobId);
     console.log(outcome.message);
     process.exitCode = outcome.ok ? 0 : 1;
+    return;
+  }
+
+  if (cmd === "serve") {
+    const { startWebServer } = await import("../web/server.ts");
+    const portFlag = flag(rest, "port");
+    const hostFlag = flag(rest, "host");
+    const server = startWebServer({
+      port: portFlag ? Number(portFlag) : undefined,
+      hostname: hostFlag,
+    });
+    console.log(`loom web UI listening on http://${server.hostname}:${server.port}`);
     return;
   }
 
