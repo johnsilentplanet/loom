@@ -1,0 +1,11 @@
+{
+  "name": "loom",
+  "version": "0.0.1",
+  "description": "A standalone, Claude-powered coding-agent DAG runner (worktree isolation + verify + merge train), subscription-auth only.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}
