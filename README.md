@@ -113,6 +113,29 @@ Wire it into Claude Code / Claude Desktop's MCP config, e.g.
 }
 ```
 
+## Web UI
+
+Loom ships a minimal, read-only local dashboard over the same SQLite store
+the CLI/MCP use (no separate state, no build step, no framework — plain
+HTML/CSS/vanilla JS served by Bun's built-in HTTP server):
+
+```sh
+loom serve
+# or
+bun run serve
+```
+
+It binds to `127.0.0.1:4177` by default (override with `LOOM_HOST` /
+`LOOM_PORT`) — deliberately not exposed publicly unless you choose a
+different host yourself, and on a port that won't collide with other local
+dev servers. Open it at <http://127.0.0.1:4177>.
+
+The page lists projects, lists jobs per project with live status
+(pending/running/verifying/merging/done/failed/cancelled), and shows the
+selected job's task tree (name, model, status, error) for DAG jobs — the
+same shape `get_run_status` / `src/core/status.ts` already return. It polls
+every few seconds; no websockets.
+
 ## Scope
 
 What loom does:
